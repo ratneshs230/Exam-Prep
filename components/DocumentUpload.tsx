@@ -2,6 +2,53 @@ import React, { useState } from 'react';
 import { Upload, FileText, Loader2, Check, Files } from 'lucide-react';
 import { GeminiService } from '../services/geminiService';
 import { Question } from '../types';
+import * as pdfjsLib from 'pdfjs-dist';
+import mammoth from 'mammoth';
+
+// Set up PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+// Extract text from PDF file
+async function extractTextFromPDF(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items
+      .map((item: any) => item.str)
+      .join(' ');
+    fullText += pageText + '\n';
+  }
+
+  return fullText;
+}
+
+// Extract text from DOCX file
+async function extractTextFromDOCX(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value;
+}
+
+// Get text content from any supported file type
+async function extractTextFromFile(file: File): Promise<string> {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+
+  switch (extension) {
+    case 'pdf':
+      return extractTextFromPDF(file);
+    case 'docx':
+      return extractTextFromDOCX(file);
+    case 'txt':
+    case 'md':
+    case 'json':
+    default:
+      return file.text();
+  }
+}
 
 interface DocumentUploadProps {
   onQuestionsParsed: (questions: Question[]) => void;
@@ -20,7 +67,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
     setIsProcessing(true);
     const files = Array.from(fileList);
     setProgress({ current: 0, total: files.length });
-    
+
     let totalQuestions = 0;
     let processedCount = 0;
     let errorCount = 0;
@@ -32,8 +79,8 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
       setStatusMsg(`Analyzing ${file.name}...`);
 
       try {
-        const text = await file.text();
-        
+        const text = await extractTextFromFile(file);
+
         // Skip empty files
         if (!text.trim()) {
            console.warn(`Skipping empty file: ${file.name}`);
@@ -41,7 +88,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
         }
 
         const parsedMcqs = await GeminiService.parseMCQsFromText(text);
-        
+
         if (parsedMcqs.length > 0) {
           const newQuestions: Question[] = parsedMcqs.map(q => ({
             ...q,
@@ -63,11 +110,11 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
     setIsProcessing(false);
     setProgress(null);
     setStatusMsg(
-      errorCount > 0 
+      errorCount > 0
         ? `Done. Extracted ${totalQuestions} questions. ${errorCount} files failed.`
         : `Success! Extracted ${totalQuestions} questions from ${processedCount} files.`
     );
-      
+
     setTimeout(() => {
       setStatusMsg('');
     }, 5000);
@@ -83,7 +130,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
 
   return (
     <div className="w-full max-w-2xl mx-auto">
-      <div 
+      <div
         className={`
           relative border-2 border-dashed rounded-xl p-10 text-center transition-all duration-200
           ${isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 hover:border-indigo-400 hover:bg-slate-50'}
@@ -93,14 +140,14 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
         onDragLeave={() => setIsDragging(false)}
         onDrop={onDrop}
       >
-        <input 
-          type="file" 
+        <input
+          type="file"
           multiple
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-          accept=".txt,.md,.json"
+          accept=".txt,.md,.json,.pdf,.docx"
           onChange={(e) => handleFiles(e.target.files)}
         />
-        
+
         <div className="flex flex-col items-center justify-center space-y-4">
           <div className="p-4 bg-white rounded-full shadow-sm">
             {isProcessing ? (
@@ -114,7 +161,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
               {isProcessing ? 'Processing Documents...' : 'Upload Study Material'}
             </h3>
             <p className="text-slate-500 mt-1 max-w-sm mx-auto">
-              {statusMsg || 'Drag & drop or click to upload multiple Markdown or Text files. The AI will extract MCQs automatically.'}
+              {statusMsg || 'Drag & drop or click to upload PDF, DOCX, Markdown or Text files. The AI will extract MCQs automatically.'}
             </p>
             {progress && (
                <p className="text-xs font-medium text-indigo-600 mt-2">
@@ -124,12 +171,14 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
           </div>
         </div>
       </div>
-      
+
       <div className="mt-6">
         <h4 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
           <Files size={16} /> Supported Formats
         </h4>
-        <div className="flex gap-3 text-xs text-slate-600">
+        <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+          <span className="px-2 py-1 bg-red-100 text-red-700 rounded">.pdf (PDF)</span>
+          <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">.docx (Word)</span>
           <span className="px-2 py-1 bg-slate-200 rounded">.md (Markdown)</span>
           <span className="px-2 py-1 bg-slate-200 rounded">.txt (Text)</span>
           <span className="px-2 py-1 bg-slate-200 rounded">.json (Structured)</span>
