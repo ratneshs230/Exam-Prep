@@ -4,6 +4,9 @@ import { Dashboard } from './components/Dashboard';
 import { DocumentUpload } from './components/DocumentUpload';
 import { QuestionBank } from './components/QuestionBank';
 import { PracticeSession } from './components/PracticeSession';
+import { ToastContainer, useToast } from './components/Toast';
+import { ErrorBoundary, SectionErrorBoundary } from './components/ErrorBoundary';
+import { SessionResults } from './components/SessionResults';
 import { GeminiService } from './services/geminiService';
 import { StorageService } from './services/storageService';
 import { LayoutDashboard, BookOpen, Upload, PlayCircle, Settings, Menu, BrainCircuit, Sliders, ArrowLeft, Clock, Loader2, Sparkles, Key, X } from 'lucide-react';
@@ -23,6 +26,9 @@ const App: React.FC = () => {
     return saved || DEFAULT_STATE;
   });
   const [isHydrated, setIsHydrated] = useState(false);
+
+  // Toast notifications
+  const { toasts, dismissToast, showWarning, showError, showSuccess } = useToast();
 
   // API Key state
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
@@ -52,10 +58,32 @@ const App: React.FC = () => {
   // Mark as hydrated after first render
   useEffect(() => {
     setIsHydrated(true);
+
+    // Check for saved session on app load
+    const savedSession = StorageService.loadActiveSession();
+    if (savedSession && savedSession.session) {
+      setSavedSessionPrompt(true);
+    }
   }, []);
+
+  const handleResumeSession = () => {
+    const savedSession = StorageService.loadActiveSession();
+    if (savedSession) {
+      setActiveSession(savedSession.session);
+      setActiveTab('PRACTICE');
+    }
+    setSavedSessionPrompt(false);
+  };
+
+  const handleDiscardSession = () => {
+    StorageService.clearActiveSession();
+    setSavedSessionPrompt(false);
+  };
 
   const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'UPLOAD' | 'BANK' | 'PRACTICE'>('DASHBOARD');
   const [activeSession, setActiveSession] = useState<QuizSession | null>(null);
+  const [sessionResults, setSessionResults] = useState<{ session: QuizSession; attempts: Attempt[] } | null>(null);
+  const [savedSessionPrompt, setSavedSessionPrompt] = useState<boolean>(false);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
 
   // Practice sub-state
@@ -79,7 +107,7 @@ const App: React.FC = () => {
 
   const handleStartPractice = (mode: 'STANDARD' | 'ADAPTIVE' | 'EXAM') => {
     if (state.questions.length === 0) {
-      alert("Your question bank is empty! Please upload some documents first.");
+      showWarning("Question Bank Empty", "Please upload some documents first to start practicing.");
       setActiveTab('UPLOAD');
       return;
     }
@@ -120,7 +148,7 @@ const App: React.FC = () => {
 
   const handleStartCustomPractice = async () => {
     if (state.questions.length === 0) {
-      alert("Your question bank is empty! Please upload some documents first.");
+      showWarning("Question Bank Empty", "Please upload some documents first to start practicing.");
       setActiveTab('UPLOAD');
       return;
     }
@@ -138,7 +166,7 @@ const App: React.FC = () => {
       const selectedQuestions = state.questions.filter(q => selectedIds.includes(q.id));
 
       if (selectedQuestions.length === 0) {
-        alert("Could not find enough questions matching your criteria.");
+        showWarning("No Matching Questions", "Could not find enough questions matching your criteria. Try broadening your filters.");
         setIsCurating(false);
         return;
       }
@@ -158,7 +186,7 @@ const App: React.FC = () => {
       setPracticeView('MENU'); // Reset view for next time
     } catch (error) {
       console.error("Failed to curate session:", error);
-      alert("Something went wrong while curating your session.");
+      showError("Curation Failed", "Something went wrong while curating your session. Please try again.");
     } finally {
       setIsCurating(false);
     }
@@ -169,13 +197,58 @@ const App: React.FC = () => {
       ...prev,
       attempts: [...prev.attempts, ...newAttempts]
     }));
+
+    // Show results page instead of going to dashboard
+    if (activeSession) {
+      setSessionResults({ session: activeSession, attempts: newAttempts });
+    }
     setActiveSession(null);
+  };
+
+  const handleCloseResults = () => {
+    setSessionResults(null);
     setActiveTab('DASHBOARD');
+  };
+
+  const handlePracticeAgain = () => {
+    setSessionResults(null);
+    setActiveTab('PRACTICE');
+  };
+
+  const handleReviewQuestions = () => {
+    setSessionResults(null);
+    setActiveTab('BANK');
+  };
+
+  const handlePracticeSubject = (subject: string) => {
+    // Set up custom practice for specific subject
+    setCustomConfig(prev => ({
+      ...prev,
+      subject: subject,
+      questionCount: 10,
+      focusArea: `Focus on ${subject} questions`
+    }));
+    setPracticeView('CUSTOM_SETUP');
+    setActiveTab('PRACTICE');
   };
 
   // --- Render Helpers ---
 
   const renderContent = () => {
+    // Show results page if we have session results
+    if (sessionResults) {
+      return (
+        <SessionResults
+          session={sessionResults.session}
+          attempts={sessionResults.attempts}
+          questions={state.questions}
+          onGoHome={handleCloseResults}
+          onPracticeAgain={handlePracticeAgain}
+          onReviewQuestions={handleReviewQuestions}
+        />
+      );
+    }
+
     if (activeSession) {
       return (
         <PracticeSession 
@@ -188,7 +261,7 @@ const App: React.FC = () => {
 
     switch (activeTab) {
       case 'DASHBOARD':
-        return <Dashboard state={state} onUploadClick={() => setActiveTab('UPLOAD')} />;
+        return <Dashboard state={state} onUploadClick={() => setActiveTab('UPLOAD')} onPracticeSubject={handlePracticeSubject} />;
       case 'UPLOAD':
         return (
           <div className="space-y-8 animate-fade-in">
@@ -437,7 +510,9 @@ const App: React.FC = () => {
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-8">
-           {renderContent()}
+           <ErrorBoundary>
+             {renderContent()}
+           </ErrorBoundary>
         </main>
       </div>
 
@@ -447,6 +522,41 @@ const App: React.FC = () => {
           className="fixed inset-0 bg-black/20 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
+      )}
+
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Resume Session Modal */}
+      {savedSessionPrompt && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 animate-fade-in">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <PlayCircle className="w-8 h-8 text-indigo-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Resume Previous Session?</h3>
+              <p className="text-sm text-slate-600">
+                You have an unfinished practice session. Would you like to continue where you left off?
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleDiscardSession}
+                className="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors font-medium"
+              >
+                Discard
+              </button>
+              <button
+                onClick={handleResumeSession}
+                className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
+              >
+                Resume
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* API Key Modal */}

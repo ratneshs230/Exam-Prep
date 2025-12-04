@@ -6,17 +6,18 @@ import {
   LineChart, Line, Radar, RadarChart, PolarGrid, 
   PolarAngleAxis, PolarRadiusAxis, Legend 
 } from 'recharts';
-import { AlertCircle, CheckCircle, TrendingUp, BookOpen, Upload, Activity, Clock, Zap } from 'lucide-react';
+import { TrendingUp, BookOpen, Upload, Activity, Clock, Zap } from 'lucide-react';
 
 interface DashboardProps {
   state: AppState;
   onUploadClick: () => void;
+  onPracticeSubject?: (subject: string) => void;
 }
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 const PIE_COLORS = ['#10b981', '#ef4444', '#e2e8f0']; // Correct, Wrong, Unattempted
 
-export const Dashboard: React.FC<DashboardProps> = ({ state, onUploadClick }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ state, onUploadClick, onPracticeSubject }) => {
   
   const stats = useMemo(() => {
     const totalQuestions = state.questions.length;
@@ -294,8 +295,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ state, onUploadClick }) =>
                )}
              </div>
              
-             {stats.weakestSubject && (
-               <button className="px-6 py-3 bg-white text-indigo-700 font-bold rounded-xl shadow-lg hover:bg-indigo-50 transition-colors whitespace-nowrap">
+             {stats.weakestSubject && onPracticeSubject && (
+               <button
+                 onClick={() => onPracticeSubject(stats.weakestSubject.subject)}
+                 className="px-6 py-3 bg-white text-indigo-700 font-bold rounded-xl shadow-lg hover:bg-indigo-50 transition-colors whitespace-nowrap"
+               >
                  Practice {stats.weakestSubject.subject}
                </button>
              )}

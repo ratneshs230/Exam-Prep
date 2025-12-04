@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
-import { Upload, FileText, Loader2, Check, Files } from 'lucide-react';
+import { Upload, Loader2, Files } from 'lucide-react';
 import { GeminiService } from '../services/geminiService';
 import { Question } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
 
-// Set up PDF.js worker using the bundled version
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+// Set up PDF.js worker for v5+
+// Using CDN for the worker to ensure compatibility
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.449/build/pdf.worker.min.mjs';
 
 // Extract text from PDF file
 async function extractTextFromPDF(file: File): Promise<string> {

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Question, Attempt, QuizSession } from '../types';
 import { GeminiService } from '../services/geminiService';
-import { ChevronRight, ChevronLeft, HelpCircle, Check, X, MessageSquare, Lightbulb, Clock, Loader2 } from 'lucide-react';
+import { StorageService } from '../services/storageService';
+import { ChevronRight, HelpCircle, Check, X, MessageSquare, Lightbulb, Clock, Loader2 } from 'lucide-react';
 
 interface PracticeSessionProps {
   session: QuizSession;
@@ -38,7 +39,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ session, onCom
   useEffect(() => {
     if (timeLeft === undefined) return;
     if (timeLeft <= 0) {
-      onComplete(attempts);
+      handleComplete(attempts);
       return;
     }
 
@@ -48,6 +49,18 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ session, onCom
 
     return () => clearInterval(timer);
   }, [timeLeft, attempts, onComplete]);
+
+  // Auto-save session progress
+  useEffect(() => {
+    // Save session whenever attempts or currentIndex changes
+    StorageService.saveActiveSession(session, attempts, currentIndex);
+  }, [session, attempts, currentIndex]);
+
+  // Clear saved session when completing
+  const handleComplete = (finalAttempts: Attempt[]) => {
+    StorageService.clearActiveSession();
+    onComplete(finalAttempts);
+  };
 
   const handleOptionSelect = (idx: number) => {
     if (isChecked && !isExamMode) return; // Prevent changing after check in practice mode
@@ -86,7 +99,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ session, onCom
     if (currentIndex < session.questions.length - 1) {
       setCurrentIndex(currentIndex + 1);
     } else {
-      onComplete(attempts);
+      handleComplete(attempts);
     }
   };
 
