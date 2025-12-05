@@ -1,47 +1,78 @@
 import React, { useState } from 'react';
-import { Upload, Loader2, Files } from 'lucide-react';
+import { Upload, Loader2, Files, AlertCircle } from 'lucide-react';
 import { GeminiService } from '../services/geminiService';
 import { Question } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
 
 // Set up PDF.js worker for v5+
-// Using CDN for the worker to ensure compatibility
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.449/build/pdf.worker.min.mjs';
 
 // Extract text from PDF file
 async function extractTextFromPDF(file: File): Promise<string> {
+  console.log(`[PDF] Starting extraction for: ${file.name}`);
+
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    console.log(`[PDF] File size: ${arrayBuffer.byteLength} bytes`);
+
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+
+    console.log(`[PDF] Document loaded. Pages: ${pdf.numPages}`);
+
     let fullText = '';
 
     for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(' ');
-      fullText += pageText + '\n';
+      try {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+
+        const pageText = textContent.items
+          .filter((item: any) => item.str && item.str.trim())
+          .map((item: any) => item.str)
+          .join(' ');
+
+        fullText += pageText + '\n\n';
+        console.log(`[PDF] Page ${i}: extracted ${pageText.length} characters`);
+      } catch (pageError) {
+        console.warn(`[PDF] Error on page ${i}:`, pageError);
+      }
     }
 
-    return fullText;
+    const trimmedText = fullText.trim();
+    console.log(`[PDF] Total extracted text: ${trimmedText.length} characters`);
+
+    if (trimmedText.length < 50) {
+      console.warn('[PDF] Very little text extracted. PDF might be image-based or protected.');
+    }
+
+    return trimmedText;
   } catch (error) {
-    console.error('PDF extraction error:', error);
-    throw new Error('Failed to extract text from PDF');
+    console.error('[PDF] Extraction failed:', error);
+    throw new Error(`PDF extraction failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 
 // Extract text from DOCX file
 async function extractTextFromDOCX(file: File): Promise<string> {
-  const arrayBuffer = await file.arrayBuffer();
-  const result = await mammoth.extractRawText({ arrayBuffer });
-  return result.value;
+  console.log(`[DOCX] Starting extraction for: ${file.name}`);
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    console.log(`[DOCX] Extracted ${result.value.length} characters`);
+    return result.value;
+  } catch (error) {
+    console.error('[DOCX] Extraction failed:', error);
+    throw new Error(`DOCX extraction failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 // Get text content from any supported file type
 async function extractTextFromFile(file: File): Promise<string> {
   const extension = file.name.split('.').pop()?.toLowerCase();
+  console.log(`[Extract] Processing file: ${file.name} (type: ${extension})`);
 
   switch (extension) {
     case 'pdf':
@@ -52,7 +83,9 @@ async function extractTextFromFile(file: File): Promise<string> {
     case 'md':
     case 'json':
     default:
-      return file.text();
+      const text = await file.text();
+      console.log(`[Text] Extracted ${text.length} characters`);
+      return text;
   }
 }
 
@@ -65,35 +98,52 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>('');
+  const [errorMsg, setErrorMsg] = useState<string>('');
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
 
   const handleFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
 
     setIsProcessing(true);
+    setErrorMsg('');
     const files = Array.from(fileList);
     setProgress({ current: 0, total: files.length });
 
     let totalQuestions = 0;
     let processedCount = 0;
     let errorCount = 0;
+    let lastError = '';
 
-    // Process files sequentially to maintain state stability and avoid API rate limits
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       setProgress({ current: i + 1, total: files.length });
-      setStatusMsg(`Analyzing ${file.name}...`);
+      setStatusMsg(`Extracting text from ${file.name}...`);
 
       try {
+        // Step 1: Extract text
         const text = await extractTextFromFile(file);
+        console.log(`[Process] Extracted text preview: "${text.substring(0, 200)}..."`);
 
-        // Skip empty files
         if (!text.trim()) {
-           console.warn(`Skipping empty file: ${file.name}`);
-           continue;
+          console.warn(`[Process] Empty text from: ${file.name}`);
+          lastError = `${file.name}: No text content found (might be image-based PDF)`;
+          errorCount++;
+          continue;
         }
 
+        if (text.length < 100) {
+          console.warn(`[Process] Very short text (${text.length} chars) from: ${file.name}`);
+          lastError = `${file.name}: Very little text extracted`;
+          errorCount++;
+          continue;
+        }
+
+        // Step 2: Send to AI for parsing
+        setStatusMsg(`AI analyzing ${file.name}...`);
+        console.log(`[Process] Sending ${text.length} characters to Gemini API`);
+
         const parsedMcqs = await GeminiService.parseMCQsFromText(text);
+        console.log(`[Process] Gemini returned ${parsedMcqs.length} questions`);
 
         if (parsedMcqs.length > 0) {
           const newQuestions: Question[] = parsedMcqs.map(q => ({
@@ -106,24 +156,35 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
           onUploadComplete(file.name, newQuestions.length);
           totalQuestions += newQuestions.length;
           processedCount++;
+        } else {
+          console.warn(`[Process] No MCQs found in: ${file.name}`);
+          lastError = `${file.name}: No MCQ questions found in content`;
+          errorCount++;
         }
       } catch (err) {
-        console.error(`Error processing ${file.name}:`, err);
+        console.error(`[Process] Error processing ${file.name}:`, err);
+        lastError = `${file.name}: ${err instanceof Error ? err.message : 'Processing failed'}`;
         errorCount++;
       }
     }
 
     setIsProcessing(false);
     setProgress(null);
-    setStatusMsg(
-      errorCount > 0
-        ? `Done. Extracted ${totalQuestions} questions. ${errorCount} files failed.`
-        : `Success! Extracted ${totalQuestions} questions from ${processedCount} files.`
-    );
+
+    if (errorCount > 0 && processedCount === 0) {
+      setStatusMsg('');
+      setErrorMsg(lastError || 'Failed to process files');
+    } else if (errorCount > 0) {
+      setStatusMsg(`Extracted ${totalQuestions} questions from ${processedCount} file(s). ${errorCount} file(s) had issues.`);
+      setErrorMsg(lastError);
+    } else {
+      setStatusMsg(`Success! Extracted ${totalQuestions} questions from ${processedCount} file(s).`);
+    }
 
     setTimeout(() => {
       setStatusMsg('');
-    }, 5000);
+      setErrorMsg('');
+    }, 10000);
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -178,6 +239,20 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
         </div>
       </div>
 
+      {/* Error Message */}
+      {errorMsg && (
+        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-red-800">Processing Issue</p>
+            <p className="text-sm text-red-600 mt-1">{errorMsg}</p>
+            <p className="text-xs text-red-500 mt-2">
+              Tip: Make sure the PDF contains selectable text (not scanned images) and has MCQ-style questions.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="mt-6">
         <h4 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
           <Files size={16} /> Supported Formats
@@ -190,7 +265,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onQuestionsParse
           <span className="px-2 py-1 bg-slate-200 rounded">.json (Structured)</span>
         </div>
         <p className="text-xs text-slate-400 mt-2">
-          You can select multiple files at once. AI processing time depends on file size.
+          PDFs must contain selectable text (not scanned images). Check browser console for detailed logs.
         </p>
       </div>
     </div>
