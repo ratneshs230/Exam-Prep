@@ -9,7 +9,7 @@ import { ErrorBoundary, SectionErrorBoundary } from './components/ErrorBoundary'
 import { SessionResults } from './components/SessionResults';
 import { GeminiService } from './services/geminiService';
 import { StorageService } from './services/storageService';
-import { LayoutDashboard, BookOpen, Upload, PlayCircle, Settings, Menu, BrainCircuit, Sliders, ArrowLeft, Clock, Loader2, Sparkles, Key, X } from 'lucide-react';
+import { LayoutDashboard, BookOpen, Upload, PlayCircle, Settings, Menu, BrainCircuit, Sliders, ArrowLeft, Clock, Loader2, Sparkles, Key, X, Trash2, FileText } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 const DEFAULT_STATE: AppState = {
@@ -84,6 +84,7 @@ const App: React.FC = () => {
   const [activeSession, setActiveSession] = useState<QuizSession | null>(null);
   const [sessionResults, setSessionResults] = useState<{ session: QuizSession; attempts: Attempt[] } | null>(null);
   const [savedSessionPrompt, setSavedSessionPrompt] = useState<boolean>(false);
+  const [deleteDocConfirm, setDeleteDocConfirm] = useState<{ id: string; name: string; questionCount: number } | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
 
   // Practice sub-state
@@ -232,6 +233,17 @@ const App: React.FC = () => {
     setActiveTab('PRACTICE');
   };
 
+  const handleDeleteDocument = (docId: string, docName: string) => {
+    // Remove document and all its associated questions
+    setState(prev => ({
+      ...prev,
+      documents: prev.documents.filter(d => d.id !== docId),
+      questions: prev.questions.filter(q => q.documentId !== docName)
+    }));
+    setDeleteDocConfirm(null);
+    showSuccess("Document Removed", `"${docName}" and its questions have been removed.`);
+  };
+
   // --- Render Helpers ---
 
   const renderContent = () => {
@@ -283,12 +295,29 @@ const App: React.FC = () => {
             />
             {state.documents.length > 0 && (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <h3 className="font-semibold text-slate-800 mb-4">Recent Uploads</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-slate-800">Uploaded Documents</h3>
+                  <span className="text-xs text-slate-500">{state.documents.length} file(s)</span>
+                </div>
                 <ul className="space-y-3">
                   {state.documents.map(doc => (
-                    <li key={doc.id} className="flex justify-between items-center text-sm p-3 bg-slate-50 rounded-lg">
-                      <span className="font-medium text-slate-700">{doc.name}</span>
-                      <span className="text-slate-500">{doc.questionCount} Questions Extracted</span>
+                    <li key={doc.id} className="flex justify-between items-center text-sm p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-white rounded-lg shadow-sm">
+                          <FileText size={18} className="text-indigo-600" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-slate-700">{doc.name}</p>
+                          <p className="text-xs text-slate-500">{doc.questionCount} questions extracted</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setDeleteDocConfirm({ id: doc.id, name: doc.name, questionCount: doc.questionCount })}
+                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Remove document and its questions"
+                      >
+                        <Trash2 size={18} />
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -553,6 +582,38 @@ const App: React.FC = () => {
                 className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
               >
                 Resume
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Document Confirmation Modal */}
+      {deleteDocConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 animate-fade-in">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-red-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Remove Document?</h3>
+              <p className="text-sm text-slate-600">
+                This will permanently remove <strong>"{deleteDocConfirm.name}"</strong> and all <strong>{deleteDocConfirm.questionCount} questions</strong> extracted from it.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteDocConfirm(null)}
+                className="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteDocument(deleteDocConfirm.id, deleteDocConfirm.name)}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
+              >
+                Remove
               </button>
             </div>
           </div>
