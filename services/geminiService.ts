@@ -17,32 +17,58 @@ const getAIClient = (): GoogleGenAI | null => {
 
 export const GeminiService = {
   /**
+   * Check if API key is configured
+   */
+  hasApiKey(): boolean {
+    return !!getApiKey();
+  },
+
+  /**
    * Parses raw text content into structured MCQ objects.
    */
   async parseMCQsFromText(text: string): Promise<Omit<Question, 'id'>[]> {
-    if (!getApiKey()) {
-      console.warn("No API Key provided. Returning mock empty array.");
-      return [];
+    const apiKey = getApiKey();
+
+    if (!apiKey) {
+      console.error("[Gemini] No API key configured");
+      throw new Error("No API key configured. Please add your Gemini API key in the sidebar.");
     }
 
-    const modelId = "gemini-2.5-flash";
-    const prompt = `
-      You are an expert data extraction assistant for an exam preparation app.
-      Analyze the following text (which may be from a Markdown or plain text document) and extract all Multiple Choice Questions (MCQs).
-      
-      For each question, deduce the:
-      - Subject (Polity, Economy, Governance, General Awareness)
-      - Difficulty (Easy, Medium, Hard)
-      - Correct Option Index (0 for A, 1 for B, 2 for C, 3 for D)
-      - Explanation (if present, otherwise generate a concise one based on the context)
+    console.log(`[Gemini] Parsing ${text.length} characters of text`);
 
-      Input Text:
-      ${text.substring(0, 30000)} // Truncate to avoid token limits in this demo
-    `;
+    // Use gemini-1.5-flash for better compatibility
+    const modelId = "gemini-1.5-flash";
+
+    const prompt = `
+You are an expert data extraction assistant for an exam preparation app.
+Analyze the following text and extract all Multiple Choice Questions (MCQs).
+
+IMPORTANT: The text may contain current affairs, general knowledge, or exam-style content.
+Look for questions with options (A, B, C, D or 1, 2, 3, 4) and extract them.
+
+For each question found, provide:
+- text: The question text
+- options: Array of 4 options [A, B, C, D]
+- correctAnswerIndex: 0 for A, 1 for B, 2 for C, 3 for D
+- explanation: Brief explanation of why the answer is correct
+- subject: One of "Polity", "Economy", "Governance", "General Awareness"
+- difficulty: One of "Easy", "Medium", "Hard"
+- tags: Array of relevant topic tags
+
+If no MCQs are found, return an empty array [].
+
+Input Text:
+${text.substring(0, 30000)}
+    `.trim();
 
     try {
+      console.log("[Gemini] Creating AI client...");
       const ai = getAIClient();
-      if (!ai) throw new Error("No API key configured");
+      if (!ai) {
+        throw new Error("Failed to initialize AI client");
+      }
+
+      console.log(`[Gemini] Sending request to ${modelId}...`);
       const response = await ai.models.generateContent({
         model: modelId,
         contents: prompt,
@@ -67,24 +93,47 @@ export const GeminiService = {
         }
       });
 
-      const json = JSON.parse(response.text || '[]');
-      
-      // Map string subject/difficulty to Enums safely
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const responseText = response.text || '[]';
+      console.log(`[Gemini] Response received: ${responseText.substring(0, 200)}...`);
+
+      const json = JSON.parse(responseText);
+      console.log(`[Gemini] Parsed ${json.length} questions`);
+
+      if (!Array.isArray(json)) {
+        console.warn("[Gemini] Response is not an array");
+        return [];
+      }
+
+      // Map and validate each question
       return json.map((q: any) => ({
-        text: q.text,
-        options: q.options,
-        correctAnswerIndex: q.correctAnswerIndex,
-        explanation: q.explanation,
+        text: q.text || '',
+        options: Array.isArray(q.options) ? q.options : [],
+        correctAnswerIndex: typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : 0,
+        explanation: q.explanation || '',
         subject: Object.values(Subject).includes(q.subject) ? q.subject : Subject.GENERAL_AWARENESS,
         difficulty: Object.values(Difficulty).includes(q.difficulty) ? q.difficulty : Difficulty.MEDIUM,
-        tags: q.tags || [],
+        tags: Array.isArray(q.tags) ? q.tags : [],
         monthYear: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-      }));
+      })).filter((q: any) => q.text && q.options.length >= 2);
 
-    } catch (error) {
-      console.error("Gemini Parsing Error:", error);
-      throw new Error("Failed to parse MCQs from the document.");
+    } catch (error: any) {
+      console.error("[Gemini] Error:", error);
+
+      // Provide specific error messages
+      if (error.message?.includes('API key')) {
+        throw new Error("Invalid API key. Please check your Gemini API key.");
+      }
+      if (error.message?.includes('quota') || error.message?.includes('rate')) {
+        throw new Error("API quota exceeded. Please try again later or check your API limits.");
+      }
+      if (error.message?.includes('network') || error.message?.includes('fetch')) {
+        throw new Error("Network error. Please check your internet connection.");
+      }
+      if (error instanceof SyntaxError) {
+        throw new Error("Failed to parse AI response. The document may not contain recognizable MCQs.");
+      }
+
+      throw new Error(`AI processing failed: ${error.message || 'Unknown error'}`);
     }
   },
 
@@ -92,13 +141,13 @@ export const GeminiService = {
    * Generates a tutor-like explanation or hint.
    */
   async getTutorResponse(
-    question: Question, 
-    userAnswerIndex: number | null, 
+    question: Question,
+    userAnswerIndex: number | null,
     mode: 'EXPLAIN' | 'HINT' | 'WHY_WRONG'
   ): Promise<string> {
-    if (!getApiKey()) return "AI features unavailable without API Key.";
+    if (!getApiKey()) return "AI features unavailable. Please add your API key in the sidebar.";
 
-    const modelId = "gemini-2.5-flash";
+    const modelId = "gemini-1.5-flash";
     let prompt = "";
 
     const qContext = `
@@ -116,14 +165,14 @@ export const GeminiService = {
       `;
     } else if (mode === 'EXPLAIN') {
       prompt = `
-        You are an expert tutor. Provide a detailed but concise explanation for why the answer is correct. 
+        You are an expert tutor. Provide a detailed but concise explanation for why the answer is correct.
         Use the provided explanation as a base but expand slightly for clarity.
         ${qContext}
       `;
     } else if (mode === 'WHY_WRONG') {
       const userAns = userAnswerIndex !== null ? question.options[userAnswerIndex] : "The option selected";
       prompt = `
-        You are a helpful tutor. The student chose '${userAns}' which is incorrect. 
+        You are a helpful tutor. The student chose '${userAns}' which is incorrect.
         Explain specifically why this option is wrong compared to the correct answer.
         ${qContext}
       `;
@@ -138,7 +187,7 @@ export const GeminiService = {
       });
       return response.text || "I couldn't generate a response at this time.";
     } catch (error) {
-      console.error("Gemini Tutor Error:", error);
+      console.error("[Gemini] Tutor Error:", error);
       return "Sorry, I'm having trouble connecting to the AI tutor right now.";
     }
   },
@@ -171,7 +220,6 @@ export const GeminiService = {
     }
 
     // 2. Prepare concise metadata for the AI
-    // We limit to 50 candidates to avoid huge prompts in this demo
     const safeCandidates = candidates.sort(() => 0.5 - Math.random()).slice(0, 50);
     const metadata = safeCandidates.map(q => ({
       id: q.id,
@@ -182,7 +230,7 @@ export const GeminiService = {
 
     const prompt = `
       You are an expert exam coordinator. Create a practice set of exactly ${requirements.count} questions from the provided list.
-      
+
       Criteria:
       - Subject: ${requirements.subject}
       - User Focus Area: ${requirements.focus || 'General practice, well-balanced'}
@@ -190,7 +238,7 @@ export const GeminiService = {
 
       Candidate Questions (JSON):
       ${JSON.stringify(metadata)}
-      
+
       Return ONLY a JSON array of the selected question IDs. Example: ["id1", "id2"]
     `;
 
@@ -198,23 +246,22 @@ export const GeminiService = {
       const ai = getAIClient();
       if (!ai) throw new Error("No API key configured");
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-1.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json"
         }
       });
-      
+
       const selectedIds = JSON.parse(response.text || '[]');
-      
-      // Fallback if AI returns empty or invalid
+
       if (!Array.isArray(selectedIds) || selectedIds.length === 0) {
         throw new Error("Empty selection from AI");
       }
-      
+
       return selectedIds;
     } catch (error) {
-      console.error("AI Curation failed, falling back to random:", error);
+      console.error("[Gemini] Curation failed, falling back to random:", error);
       return candidates
         .sort(() => 0.5 - Math.random())
         .slice(0, requirements.count)
