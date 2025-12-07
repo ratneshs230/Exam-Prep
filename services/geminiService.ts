@@ -36,8 +36,8 @@ export const GeminiService = {
 
     console.log(`[Gemini] Parsing ${text.length} characters of text`);
 
-    // Use gemini-1.5-flash for better compatibility
-    const modelId = "gemini-1.5-flash";
+    // Use gemini-2.0-flash - current production model
+    const modelId = "gemini-2.0-flash";
 
     const prompt = `
 You are an expert data extraction assistant for an exam preparation app.
@@ -147,7 +147,7 @@ ${text.substring(0, 30000)}
   ): Promise<string> {
     if (!getApiKey()) return "AI features unavailable. Please add your API key in the sidebar.";
 
-    const modelId = "gemini-1.5-flash";
+    const modelId = "gemini-2.0-flash";
     let prompt = "";
 
     const qContext = `
@@ -246,7 +246,7 @@ ${text.substring(0, 30000)}
       const ai = getAIClient();
       if (!ai) throw new Error("No API key configured");
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-2.0-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json"
