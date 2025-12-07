@@ -40,24 +40,35 @@ export const GeminiService = {
     const modelId = "gemini-2.0-flash";
 
     const prompt = `
-You are an expert data extraction assistant for an exam preparation app.
-Analyze the following text and extract all Multiple Choice Questions (MCQs).
+You are an expert exam question creator for competitive exams like LDCE SO Grade B.
+Analyze the following text content and GENERATE Multiple Choice Questions (MCQs) based on it.
 
-IMPORTANT: The text may contain current affairs, general knowledge, or exam-style content.
-Look for questions with options (A, B, C, D or 1, 2, 3, 4) and extract them.
+IMPORTANT INSTRUCTIONS:
+1. If the text contains existing MCQs, extract them.
+2. If the text is informational content (like current affairs, news compilations, study material),
+   CREATE new MCQs based on the important facts, events, dates, names, and concepts mentioned.
+3. Focus on facts that are likely to appear in competitive exams.
+4. Generate questions that test factual recall, understanding, and application.
+5. Aim to generate 10-20 quality questions from the content.
 
-For each question found, provide:
-- text: The question text
-- options: Array of 4 options [A, B, C, D]
-- correctAnswerIndex: 0 for A, 1 for B, 2 for C, 3 for D
-- explanation: Brief explanation of why the answer is correct
+For each question, provide:
+- text: A clear, well-formed question
+- options: Array of exactly 4 options (make wrong options plausible but clearly incorrect)
+- correctAnswerIndex: 0 for first option, 1 for second, 2 for third, 3 for fourth
+- explanation: Brief explanation of why the answer is correct (include relevant facts)
 - subject: One of "Polity", "Economy", "Governance", "General Awareness"
 - difficulty: One of "Easy", "Medium", "Hard"
-- tags: Array of relevant topic tags
+- tags: Array of relevant topic tags (e.g., ["Current Affairs", "April 2025", "Sports"])
 
-If no MCQs are found, return an empty array [].
+Question types to create:
+- Who/What/When/Where questions about events
+- Questions about appointments, awards, rankings
+- Questions about government schemes and policies
+- Questions about international events and agreements
+- Questions about sports achievements and records
+- Questions about science and technology developments
 
-Input Text:
+Input Content:
 ${text.substring(0, 30000)}
     `.trim();
 
